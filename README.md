@@ -38,7 +38,9 @@ V_{n+1}(\tau)
 = \max_{x \in \mathcal{F}_{n+1}(\tau)} \mu^f_{n+1}(x),
 $$
 
-where $\mathcal{F}_{n+1}(\tau) = \{x : \text{PF}_{n+1}(x) \ge \tau\}$
+where 
+
+$\mathcal{F}_{n+1}(\tau) = \{x : \text{PF}_{n+1}(x) \ge \tau\}$
 is the thresholded feasible set after the hypothetical new observation.
 
 Then, the **Thresholded Constrained Knowledge Gradient** acquisition function is defined as:
@@ -64,8 +66,7 @@ $$
 \frac{1}{M} \sum_{m=1}^{M}
 \Big[
 \max_{x \in \mathcal{F}_{n+1}^{(m)}(\tau)} \mu^{f,(m)}_{n+1}(x)
-\Big]
--
+\Big] -
 \max_{x \in \mathcal{F}_n(\tau)} \mu^f_n(x)
 $$
 
