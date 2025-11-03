@@ -40,7 +40,10 @@ $$
 
 where 
 
-$\mathcal{F}_{n+1}(\tau) = \{x : \text{PF}_{n+1}(x) \ge \tau\}$
+$ 
+\mathcal{F}_{n+1}(\tau) = \{x:\text{PF}_{n+1}(x) \ge \tau\} 
+$
+
 is the thresholded feasible set after the hypothetical new observation.
 
 Then, the **Thresholded Constrained Knowledge Gradient** acquisition function is defined as:
