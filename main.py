@@ -153,23 +153,36 @@ class BayesianOptimizer:
         self.tau = tau
         self.dim= dim
 
-        # --- define grid and initial points ---
         if self.dim == 1:
             self.grid_n = 200
             self.candidates = np.linspace(0, 1, 101).reshape(-1, 1)
             self.X_grid = np.linspace(0, 1, self.grid_n).reshape(-1, 1)
             self.X_train = np.linspace(0, 1, init_points).reshape(-1, 1)
-        else:
 
-            self.grid_n= 25
+        elif self.dim == 2:
+            self.grid_n = 25
             sampler = qmc.LatinHypercube(d=self.dim, seed=seed)
             self.X_train = sampler.random(n=init_points)
 
-            # Build a 2D or 3D grid (square grid for first 2 dims)
+            # regular 2D grid for visualization & candidate set
             x1 = np.linspace(0, 1, self.grid_n)
             x2 = np.linspace(0, 1, self.grid_n)
             self.X_grid = np.array(np.meshgrid(x1, x2)).reshape(2, -1).T
             self.candidates = self.X_grid.copy()
+
+        elif self.dim == 3:
+            # use LHS for both train and candidates
+            sampler = qmc.LatinHypercube(d=self.dim, seed=seed)
+            self.X_train = sampler.random(n=init_points)
+
+            # candidates and grid both via LHS (space-filling 3D design)
+            self.grid_n = 2000
+            self.X_grid = sampler.random(n=self.grid_n)
+            self.candidates = self.X_grid.copy()
+
+        else:
+            raise ValueError("This implementation currently supports dim = 1, 2, or 3.")
+
 
         # --- evaluate function and constraints on init points ---
         self.y_train = func(self.X_train).ravel()
@@ -424,7 +437,7 @@ def run_experiments_with_acq(problem, acq_type="tckg" ,n_runs=10, seed_base=31, 
         print(f"==============================")
 
         bo = BayesianOptimizer(obj, cons,
-                               n_steps=n_steps, init_points=init_points, m_mc=15, tau=0.5, seed=run)
+                               n_steps=n_steps, init_points=init_points, m_mc=15, tau=0.5, seed=run, dim=dim)
 
         for step in range(bo.n_steps):
             gp_obj = bo._fit_gp(bo.X_train, bo.y_train)
