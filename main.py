@@ -5,6 +5,8 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C
 import os
 from scipy.stats import qmc
+import time
+import json
 
 from benchmarks import BENCHMARKS, expand_constraints
 
@@ -403,11 +405,18 @@ def constraint_ring(X):
     return (X[:, 0] - 0.5)**2 + (X[:, 1] - 0.5)**2 - 0.15**2
 
 
-def run_experiments_with_acq(problem, acq_type="tckg" ,n_runs=10, seed_base=31, visualize= True):
+def run_experiments_with_acq(problem, acq_type="tckg" ,n_runs=10, seed_base=31, visualize= True, dim= 2):
     
     obj, cons = BENCHMARKS[problem]
     cons = expand_constraints(cons)
     all_progress = []
+    
+    init_points= 5
+    n_steps= 15
+    
+    if dim==3:
+        init_points= 10
+        n_steps= 20
 
     for run in range(n_runs):
         print(f"\n==============================")
@@ -415,7 +424,7 @@ def run_experiments_with_acq(problem, acq_type="tckg" ,n_runs=10, seed_base=31, 
         print(f"==============================")
 
         bo = BayesianOptimizer(obj, cons,
-                               n_steps=15, init_points=5, m_mc=15, tau=0.5, seed=run)
+                               n_steps=n_steps, init_points=init_points, m_mc=15, tau=0.5, seed=run)
 
         for step in range(bo.n_steps):
             gp_obj = bo._fit_gp(bo.X_train, bo.y_train)
@@ -438,7 +447,7 @@ def run_experiments_with_acq(problem, acq_type="tckg" ,n_runs=10, seed_base=31, 
                 raise ValueError(f"Unknown acq_type {acq_type}")
             
             # Visualization (optional)
-            if visualize and acq_type == "tckg":
+            if visualize and acq_type == "tckg" and dim==2:
                 bo._visualize(gp_obj, gp_cons, acq_values, x_next, step, problem+"/experiment_"+acq_type+"_"+str(run))
 
             y_next = bo.func(x_next)
@@ -479,12 +488,49 @@ def run_experiments_with_acq(problem, acq_type="tckg" ,n_runs=10, seed_base=31, 
 
 
 
-def conduct_experiment(problem, n_runs=10):
-    os.makedirs(problem, exist_ok=True)
-    mean_tckg, std_tckg, _ = run_experiments_with_acq(acq_type="tckg", n_runs=n_runs, problem= problem)
-    mean_cei, std_cei, _ = run_experiments_with_acq(acq_type="cei", n_runs=n_runs, problem= problem)
-    mean_rand, std_rand, _ = run_experiments_with_acq(acq_type="random", n_runs=n_runs, problem= problem)
 
+
+
+
+def conduct_experiment(problem, n_runs=10, dim= 2):
+    os.makedirs(problem, exist_ok=True)
+
+    results = {}
+
+    start = time.time()
+    mean_tckg, std_tckg, _ = run_experiments_with_acq(acq_type="tckg", n_runs=n_runs, problem=problem, dim= dim)
+    tckg_time = time.time() - start
+
+    start = time.time()
+    mean_cei, std_cei, _ = run_experiments_with_acq(acq_type="cei", n_runs=n_runs, problem=problem, dim= dim)
+    cei_time = time.time() - start
+
+    start = time.time()
+    mean_rand, std_rand, _ = run_experiments_with_acq(acq_type="random", n_runs=n_runs, problem=problem, dim= dim)
+    rand_time = time.time() - start
+
+    # Store raw means, stds, and timings
+    results["tckg"] = {
+        "mean": mean_tckg.tolist(),
+        "std": std_tckg.tolist(),
+        "time_seconds": tckg_time
+    }
+    results["cei"] = {
+        "mean": mean_cei.tolist(),
+        "std": std_cei.tolist(),
+        "time_seconds": cei_time
+    }
+    results["random"] = {
+        "mean": mean_rand.tolist(),
+        "std": std_rand.tolist(),
+        "time_seconds": rand_time
+    }
+
+    # Save to JSON
+    with open(os.path.join(problem, "results.json"), "w") as f:
+        json.dump(results, f, indent=4)
+
+    # Plot
     steps = np.arange(1, len(mean_tckg) + 1)
     plt.figure(figsize=(8, 5))
     plt.plot(steps, mean_tckg, label="TCKG")
@@ -502,15 +548,22 @@ def conduct_experiment(problem, n_runs=10):
     plt.legend()
     plt.grid(True, linestyle="--", alpha=0.5)
     plt.tight_layout()
-    plt.savefig(problem+"/cei_vs_tckg_vs_random.png", dpi=150)
+    plt.savefig(os.path.join(problem, "cei_vs_tckg_vs_random.png"), dpi=150)
+
 
 
 
 if __name__ == "__main__":
-    conduct_experiment(problem="branin_wavy", n_runs=10)
-    conduct_experiment(problem="sixhump_wedge", n_runs=10)
-    conduct_experiment(problem="goldstein_tiltedellipse", n_runs=10)
-    conduct_experiment(problem="branin_easy_circle", n_runs=10)
-    conduct_experiment(problem="goldstein_annulus", n_runs=10)
+    # conduct_experiment(problem="branin_wavy", n_runs=10)
+    # conduct_experiment(problem="sixhump_wedge", n_runs=10)
+    # conduct_experiment(problem="goldstein_tiltedellipse", n_runs=10)
+    # conduct_experiment(problem="branin_easy_circle", n_runs=10)
+    # conduct_experiment(problem="goldstein_annulus", n_runs=10)
+    
+    # 3d
+    conduct_experiment(problem="hartmann3_tunnel", n_runs=10, dim= 3)
+    conduct_experiment(problem="ackley3_shell", n_runs=10, dim= 3)
+    conduct_experiment(problem="rosenbrock3_tunnel", n_runs=10, dim= 3)
+    conduct_experiment(problem="levy3_shell", n_runs=10, dim= 3)
     
     
