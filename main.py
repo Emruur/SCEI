@@ -7,7 +7,7 @@ import os
 from scipy.stats import qmc
 import time
 import json
-
+from scipy.optimize import minimize
 from benchmarks import BENCHMARKS, expand_constraints
 
 # -------------------------------------------------------------
@@ -502,81 +502,107 @@ def run_experiments_with_acq(problem, acq_type="tckg" ,n_runs=10, seed_base=31, 
 
 
 
+def find_feasible_minimum(problem, dim):
+    """Find feasible minimum for a benchmark using constrained optimization."""
+    func, cons_fns = BENCHMARKS[problem]
+    cons_fns = expand_constraints(cons_fns)
+
+    # Objective wrapper
+    def obj(x):
+        return func(np.array(x).reshape(1, -1))[0, 0]
+
+    # Convert constraint functions g(x) ≤ 0 to scipy style
+    constraints = [{"type": "ineq", "fun": lambda x, g=g: -g(np.array(x).reshape(1, -1))[0]} for g in cons_fns]
+
+    # Try several starting points (since many problems are nonconvex)
+    best_val = np.inf
+    best_x = None
+    for _ in range(50):
+        x0 = np.random.rand(dim)
+        res = minimize(obj, x0, bounds=[(0, 1)] * dim, constraints=constraints, method="SLSQP", options={"maxiter": 500})
+        if res.success and res.fun < best_val:
+            best_val = res.fun
+            best_x = res.x
+
+    return best_x.tolist(), float(best_val)
 
 
-
-def conduct_experiment(problem, n_runs=10, dim= 2):
+def conduct_experiment(problem, n_runs=10, dim=2):
     os.makedirs(problem, exist_ok=True)
-
     results = {}
 
-    start = time.time()
-    mean_tckg, std_tckg, _ = run_experiments_with_acq(acq_type="tckg", n_runs=n_runs, problem=problem, dim= dim)
-    tckg_time = time.time() - start
+    # === Step 1: Identify feasible minimum ===
+    feasible_x, feasible_y = find_feasible_minimum(problem, dim)
+    print(f"Feasible minimum for {problem}: f(x*) = {feasible_y:.5f} at {feasible_x}")
 
-    start = time.time()
-    mean_cei, std_cei, _ = run_experiments_with_acq(acq_type="cei", n_runs=n_runs, problem=problem, dim= dim)
-    cei_time = time.time() - start
+    # === Step 2: Run experiments for all acq types ===
+    acq_types = ["tckg", "cei", "random"]
+    for acq in acq_types:
+        start = time.time()
+        mean_raw, std_raw, all_runs = run_experiments_with_acq(acq_type=acq, n_runs=n_runs, problem=problem, dim=dim)
+        elapsed = time.time() - start
 
-    start = time.time()
-    mean_rand, std_rand, _ = run_experiments_with_acq(acq_type="random", n_runs=n_runs, problem=problem, dim= dim)
-    rand_time = time.time() - start
+        # Compute regret (raw - feasible min)
+        mean_regret = mean_raw - feasible_y
+        std_regret = std_raw  # same std applies numerically to regret
 
-    # Store raw means, stds, and timings
-    results["tckg"] = {
-        "mean": mean_tckg.tolist(),
-        "std": std_tckg.tolist(),
-        "time_seconds": tckg_time
-    }
-    results["cei"] = {
-        "mean": mean_cei.tolist(),
-        "std": std_cei.tolist(),
-        "time_seconds": cei_time
-    }
-    results["random"] = {
-        "mean": mean_rand.tolist(),
-        "std": std_rand.tolist(),
-        "time_seconds": rand_time
-    }
+        # Compute separate positive/negative std for asymmetric uncertainty visualization
+        diffs = np.array(all_runs) - mean_raw[None, :]
+        pos_std = np.std(np.clip(diffs, 0, None), axis=0)
+        neg_std = np.std(np.clip(-diffs, 0, None), axis=0)
 
-    # Save to JSON
+        results[acq] = {
+            "mean_raw": mean_raw.tolist(),
+            "std_raw": std_raw.tolist(),
+            "mean_regret": mean_regret.tolist(),
+            "std_regret": std_regret.tolist(),
+            "pos_std_regret": pos_std.tolist(),
+            "neg_std_regret": neg_std.tolist(),
+            "time_seconds": elapsed
+        }
+
+    # === Step 3: Save JSON with feasible minimum ===
+    results["feasible_min"] = {"x": feasible_x, "y": feasible_y}
     with open(os.path.join(problem, "results.json"), "w") as f:
         json.dump(results, f, indent=4)
 
-    # Plot
-    steps = np.arange(1, len(mean_tckg) + 1)
+    # === Step 4: Plot mean ± std ===
+    steps = np.arange(1, len(next(iter(results.values()))["mean_raw"]) + 1)
     plt.figure(figsize=(8, 5))
-    plt.plot(steps, mean_tckg, label="TCKG")
-    plt.fill_between(steps, mean_tckg - std_tckg, mean_tckg + std_tckg, alpha=0.2)
-
-    plt.plot(steps, mean_cei, label="CEI")
-    plt.fill_between(steps, mean_cei - std_cei, mean_cei + std_cei, alpha=0.2)
-
-    plt.plot(steps, mean_rand, label="Random Sampling")
-    plt.fill_between(steps, mean_rand - std_rand, mean_rand + std_rand, alpha=0.2)
-
+    for acq, style in zip(acq_types, ["tab:blue", "tab:orange", "tab:green"]):
+        m = np.array(results[acq]["mean_raw"])
+        s = np.array(results[acq]["std_raw"])
+        plt.plot(steps, m, label=acq.upper(), color=style)
+        plt.fill_between(steps, m - s, m + s, alpha=0.2, color=style)
     plt.xlabel("Iteration")
     plt.ylabel("Best feasible f(x)")
-    plt.title("Constrained Optimization Progress Comparison")
+    plt.title(f"{problem}: Constrained Optimization (raw means ± std)")
     plt.legend()
     plt.grid(True, linestyle="--", alpha=0.5)
     plt.tight_layout()
-    plt.savefig(os.path.join(problem, "cei_vs_tckg_vs_random.png"), dpi=150)
+    plt.savefig(os.path.join(problem, f"{problem}_raw_std.png"), dpi=150)
 
-
+    # === Step 5: Plot regret with asymmetric stds ===
+    plt.figure(figsize=(8, 5))
+    for acq, style in zip(acq_types, ["tab:blue", "tab:orange", "tab:green"]):
+        m = np.array(results[acq]["mean_regret"])
+        s_pos = np.array(results[acq]["pos_std_regret"])
+        s_neg = np.array(results[acq]["neg_std_regret"])
+        plt.plot(steps, m, label=acq.upper(), color=style)
+        plt.fill_between(steps, m - s_neg, m + s_pos, alpha=0.2, color=style)
+    plt.xlabel("Iteration")
+    plt.ylabel("Regret = f(x) - f(x*)")
+    plt.title(f"{problem}: Regret Progress (with asymmetric std)")
+    plt.legend()
+    plt.yscale("log")
+    plt.grid(True, linestyle="--", alpha=0.5)
+    plt.tight_layout()
+    plt.savefig(os.path.join(problem, f"{problem}_regret_asym_std.png"), dpi=150)
 
 
 if __name__ == "__main__":
-    # conduct_experiment(problem="branin_wavy", n_runs=10)
-    # conduct_experiment(problem="sixhump_wedge", n_runs=10)
-    # conduct_experiment(problem="goldstein_tiltedellipse", n_runs=10)
-    # conduct_experiment(problem="branin_easy_circle", n_runs=10)
-    # conduct_experiment(problem="goldstein_annulus", n_runs=10)
-    
-    # 3d
-    conduct_experiment(problem="hartmann3_tunnel", n_runs=10, dim= 3)
-    conduct_experiment(problem="ackley3_shell", n_runs=10, dim= 3)
-    conduct_experiment(problem="rosenbrock3_tunnel", n_runs=10, dim= 3)
-    conduct_experiment(problem="levy3_shell", n_runs=10, dim= 3)
-    
-    
+    # 3D experiments
+    #conduct_experiment(problem="hartmann3_tunnel", n_runs=10, dim=3)
+    conduct_experiment(problem="ackley3_shell", n_runs=10, dim=3)
+    #conduct_experiment(problem="rosenbrock3_tunnel", n_runs=10, dim=3)
+    #conduct_experiment(problem="levy3_shell", n_runs=10, dim=3)
