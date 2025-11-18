@@ -3,7 +3,7 @@ from scipy.stats import qmc
 from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C
 from sklearn.gaussian_process import GaussianProcessRegressor
 import os
-
+from scipy.stats import norm
 from AcquisitionFunctions import ConstrainedEI, SigmoidConstrainedEI
 import matplotlib.pyplot as plt
 
@@ -81,82 +81,7 @@ class BayesianOptimizer:
 
         dim = self.X_train.shape[1]
 
-        # -----------------------------
-        # 1D visualization (same as before)
-        # -----------------------------
-        if dim == 1:
-            X_plot = np.linspace(0, 1, self.grid_n).reshape(-1, 1)
-            mu, std = gpr_obj.predict(X_plot, return_std=True)
-            true_y = self.func(X_plot)
-
-            mu_c, std_c = gpr_cons[0].predict(X_plot, return_std=True)
-            true_c = self.constraints[0](X_plot)
-            feas_mask = true_c <= 0
-
-            fig, axes = plt.subplots(2, 2, figsize=(14, 8))
-            # (1) True function
-            axes[0, 0].plot(X_plot, true_y, "k", label="True f(x)")
-            axes[0, 0].fill_between(X_plot.ravel(), np.min(true_y), np.max(true_y),
-                                    where=feas_mask.ravel(), color="green", alpha=0.15,
-                                    label="Feasible region")
-            axes[0, 0].scatter(self.X_train, self.y_train, color="tab:blue", marker="x")
-            axes[0, 0].axvline(x_next, color="red", linestyle="--", lw=1)
-            axes[0, 0].set_xlim(0, 1)
-            axes[0, 0].set_title(f"True f(x) with Feasible Region (Step {step+1})")
-            axes[0, 0].legend()
-
-            # (2) Objective GP
-            axes[0, 1].plot(X_plot, mu, color="tab:orange", label="GP mean")
-            axes[0, 1].fill_between(X_plot.ravel(), mu - 2 * std, mu + 2 * std,
-                                    color="tab:orange", alpha=0.2)
-            axes[0, 1].scatter(self.X_train, self.y_train, color="k", s=15)
-            axes[0, 1].axvline(x_next, color="red", linestyle="--")
-            axes[0, 1].set_xlim(0, 1)
-            axes[0, 1].set_title("Objective GP Posterior ±2σ")
-
-            # (3) Probability of Feasibility (PF)
-            # Compute PF(x) on the grid
-            mus_c_grid = []
-            stds_c_grid = []
-            for gp in gpr_cons:
-                mu_c_g, std_c_g = gp.predict(self.X_grid, return_std=True)
-                mus_c_grid.append(mu_c_g)
-                stds_c_grid.append(std_c_g)
-
-            # PF = product_i Phi(-(mu_ci / std_ci))
-            PF_grid = np.ones(len(self.X_grid))
-            from scipy.stats import norm
-            for mu_c_g, std_c_g in zip(mus_c_grid, stds_c_grid):
-                PF_grid *= norm.cdf(-mu_c_g / (std_c_g + 1e-12))
-
-            # reshape for contour plot
-            PF_map = PF_grid.reshape(n, n)
-
-            # Visualize PF
-            im3 = axes[1, 0].contourf(X1, X2, PF_map, 30, cmap="viridis")
-            axes[1, 0].contour(X1, X2, PF_map, levels=[self.tau], colors="red", linewidths=2)
-            axes[1, 0].scatter(self.X_train[:, 0], self.X_train[:, 1], color="white", s=20)
-            axes[1, 0].set_title("Probability of Feasibility (PF)")
-            plt.colorbar(im3, ax=axes[1, 0])
-
-
-            # (4) Acquisition function
-            axes[1, 1].plot(self.candidates, acq_values, color="tab:green")
-            axes[1, 1].axvline(x_next, color="red", linestyle="--", label="max TCKG")
-            axes[1, 1].legend()
-            axes[1, 1].set_xlim(0, 1)
-            axes[1, 1].set_title("TCKG Acquisition Function")
-
-            plt.tight_layout()
-            plt.savefig(fname, dpi=150)
-            plt.close(fig)
-            print(f"[Saved] Visualization for step {step+1} → {fname}")
-            return
-
-        # -----------------------------
-        # 2D visualization
-        # -----------------------------
-        elif dim == 2:
+        if dim == 2:
             n = int(np.sqrt(len(self.X_grid)))
             X1 = self.X_grid[:, 0].reshape(n, n)
             X2 = self.X_grid[:, 1].reshape(n, n)
@@ -167,6 +92,13 @@ class BayesianOptimizer:
             mu_c, _ = gpr_cons[0].predict(self.X_grid, return_std=True)
             mu_c = mu_c.reshape(n, n)
 
+            for gpr in gpr_cons:
+                mu_c, std_c = gpr.predict(self.X_grid, return_std=True)
+                std_c = np.maximum(std_c, 1e-9)  # avoid divide-by-zero
+                PF_i = norm.cdf((0 - mu_c) / std_c)
+                PF *= PF_i
+
+            PF = PF.reshape(n, n)
             true_y = self.func(self.X_grid).reshape(n, n)
             true_c = self.constraints[0](self.X_grid).reshape(n, n)
 
@@ -207,7 +139,7 @@ class BayesianOptimizer:
             plt.close(fig)
             print(f"[Saved] 2D Visualization for step {step+1} → {fname}")
             
-    def run(self, visualize= True, acq_type= "cei"):
+    def run(self, visualize= True, acq_type= "cei", scei_params= None):
         progress= []
 
         for step in range(self.n_steps):
@@ -222,7 +154,7 @@ class BayesianOptimizer:
                 acq_values = acq.compute(self.candidates, best_feas)
                 x_next = self.candidates[np.argmax(acq_values)]
             elif acq_type == "scei":
-                acq = SigmoidConstrainedEI(gp_obj, gp_cons, tau=self.tau)
+                acq = SigmoidConstrainedEI(gp_obj, gp_cons, tau=self.tau, k= scei_params["k"], alpha= scei_params["alpha"])
                 acq_values = acq.compute(self.candidates, best_feas)
                 x_next = self.candidates[np.argmax(acq_values)]
             else:

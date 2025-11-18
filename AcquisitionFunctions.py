@@ -9,10 +9,12 @@ def sigmoid(x, k=0.1, center=0.5):
 class SigmoidConstrainedEI:
     """Expected Improvement with probabilistic constraints (CEI)."""
 
-    def __init__(self, gp_obj, gp_cons, tau=0.5):
+    def __init__(self, gp_obj, gp_cons, k, alpha,tau=0.5):
         self.gp_obj = gp_obj
         self.gp_cons = gp_cons
         self.tau = tau
+        self.k= k
+        self.alpha= alpha
 
     def _posterior_mu_std(self, gp, X):
         mu, std = gp.predict(X, return_std=True)
@@ -33,7 +35,7 @@ class SigmoidConstrainedEI:
             stds_c.append(std_c)
 
         PF = self.probability_of_feasibility(mus_c, stds_c)
-        activated_PF= sigmoid(PF)
+        activated_PF= sigmoid(PF, self.k, self.alpha)
         
         improvement= mu_y - best_feas
         Z =  improvement/ (std_y + 1e-12)
