@@ -376,7 +376,7 @@ def conduct_experiment(problem, n_runs=10, dim=2):
     plt.tight_layout()
     plt.savefig(os.path.join(problem, f"{problem}_regret_asym_std.png"), dpi=150)
     
-conduct_comparison_experiment("goldstein_annulus", n_runs=3)
+conduct_comparison_experiment("goldstein_annulus", n_runs=10)
 
 #conduct_experiment("goldstein_annulus", n_runs=10)
 
