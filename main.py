@@ -67,19 +67,10 @@ def generate_scei_hparams_list():
     return hparam_list
 
 
-import numpy as np
-import os
-import json
-import matplotlib.pyplot as plt
-
-# Assuming find_feasible_maximum, run_experiment, and generate_scei_hparams_list are defined elsewhere.
-# Assuming class NumpyEncoder is defined at the end of the script as before.
-
 def conduct_comparison_experiment(problem, n_runs=10, dim=2):
     """
     Runs 100 SCEI variants and CEI, saves results to <problem>_kablation/, 
-    plots regret with symmetric STD, and performs an ablation analysis on k and alpha
-    using the Variance of the Mean Objective method.
+    plots regret with symmetric STD, and performs an ablation analysis on k and alpha.
     """
     
     # 1. Set the new output directory
@@ -91,22 +82,22 @@ def conduct_comparison_experiment(problem, n_runs=10, dim=2):
     feasible_x, feasible_y = find_feasible_maximum(problem, dim)
     print(f"Feasible Maximum for {problem}: f(x*) = {feasible_y:.5f} at {feasible_x}")
 
-    # === Define Acquisition List and Run Experiments (Same as before) ===
+    # === Define Acquisition List ===
     acq_list = [("cei", {})]
     scei_hparams_list = generate_scei_hparams_list()
+    for hparams in scei_hparams_list:
+        name = f"scei_k{hparams['k']:.2e}_a{hparams['alpha']:.2f}"
+        acq_list.append((name, hparams))
     
-    print(f"\n--- Running {len(scei_hparams_list) + 1} acquisition strategies ---")
+    print(f"\n--- Running {len(acq_list)} different acquisition strategies ({len(scei_hparams_list)} SCEI variants) ---")
     
-    all_scei_regrets_data = [] # Stores {k, alpha, value} for final regret
-    all_scei_aucs_data = []      # Stores {k, alpha, value} for AUC
+    # Initialize lists for ablation analysis
+    all_scei_regrets = []
+    all_scei_aucs = []
     
+    # === Step 2: Run experiments for all acq types ===
     for i, (acq_name, hparams) in enumerate(acq_list):
         acq_type = "cei" if acq_name == "cei" else "scei"
-        
-        # ... (Run experiment, calculate mean_regret, std_raw, diffs, pos_std, neg_std, and auc) ...
-        # [Placeholder for existing Step 2 code block]
-        
-        # --- Start of placeholder for Step 2 ---
         
         # Run experiment (setting visualize=False)
         mean_raw, std_raw, all_runs = run_experiment(
@@ -116,7 +107,7 @@ def conduct_comparison_experiment(problem, n_runs=10, dim=2):
         # Compute regret: Regret = f(x*) - f(x)
         mean_regret = feasible_y - mean_raw
         
-        # Compute asymmetric std (still needed for plotting best variant uncertainty)
+        # Compute asymmetric std (still needed for plotting best variant uncertainty, though not for the main plot)
         diffs = np.array(all_runs) - mean_raw[None, :]
         pos_std = np.std(np.clip(diffs, 0, None), axis=0)
         neg_std = np.std(np.clip(-diffs, 0, None), axis=0)
@@ -134,26 +125,26 @@ def conduct_comparison_experiment(problem, n_runs=10, dim=2):
         }
         
         if acq_type == "scei":
-            all_scei_regrets_data.append({'k': hparams['k'], 'alpha': hparams['alpha'], 'value': mean_regret[-1]})
-            all_scei_aucs_data.append({'k': hparams['k'], 'alpha': hparams['alpha'], 'value': auc})
+            # Store final regret and AUC for ablation analysis
+            all_scei_regrets.append({'k': hparams['k'], 'alpha': hparams['alpha'], 'value': mean_regret[-1]})
+            all_scei_aucs.append({'k': hparams['k'], 'alpha': hparams['alpha'], 'value': auc})
         
         if (i + 1) % 20 == 0 or i == 0:
             print(f"  Completed {i+1}/{len(acq_list)}: {acq_name}")
-            
-        # --- End of placeholder for Step 2 ---
 
 
-    # === Step 3: Save JSON with all results (Same as before) ===
+    # === Step 3: Save JSON with all results ===
     results["feasible_max"] = {"x": feasible_x, "y": feasible_y}
     with open(os.path.join(output_dir, "results_all.json"), "w") as f:
-        json.dump(results, f, indent=4, cls=NumpyEncoder)
+        json.dump(results, f, indent=4)
 
     # === Step 4: Identify Best SCEI Variants & Ablation Analysis ===
     
+    # Separate results for plotting
     cei_result = results["cei"]
     scei_results = {name: r for name, r in results.items() if name.startswith("scei")}
 
-    # --- 4a. Find Min Regret & Min AUC (Same as before) ---
+    # --- 4a. Find Min Regret & Min AUC ---
     final_regrets = {name: r["mean_regret"][-1] for name, r in scei_results.items()}
     min_regret_name = min(final_regrets, key=final_regrets.get)
     min_regret_result = scei_results[min_regret_name]
@@ -175,47 +166,39 @@ def conduct_comparison_experiment(problem, n_runs=10, dim=2):
         }
     }
     
-    # --- 4b. Variance of the Mean Objective (New Calculation) ---
-    k_values = sorted(list(set(r['k'] for r in all_scei_regrets_data)))
-    alpha_values = sorted(list(set(r['alpha'] for r in all_scei_regrets_data)))
+    # --- 4b. Variance of Objectives on alpha and k ---
+    k_values = np.logspace(-2, 2, 10)
+    alpha_values = np.linspace(0.0, 1.0, 10, endpoint=False)
     
-    # Group data by single parameter
+    # Variance over K (Averaging Regret/AUC for fixed K across all Alpha)
     regret_by_k = {k: [] for k in k_values}
-    regret_by_alpha = {a: [] for a in alpha_values}
     auc_by_k = {k: [] for k in k_values}
+    
+    # Variance over Alpha (Averaging Regret/AUC for fixed Alpha across all K)
+    regret_by_alpha = {a: [] for a in alpha_values}
     auc_by_alpha = {a: [] for a in alpha_values}
 
-    for r in all_scei_regrets_data:
+    # Populate variance data structures
+    for r in all_scei_regrets:
         regret_by_k[r['k']].append(r['value'])
         regret_by_alpha[r['alpha']].append(r['value'])
         
-    for r in all_scei_aucs_data:
+    for r in all_scei_aucs:
         auc_by_k[r['k']].append(r['value'])
         auc_by_alpha[r['alpha']].append(r['value'])
 
-    # 1. Calculate the MEAN performance for each parameter level
-    # Average across the other parameter (e.g., Mean_Regret_for_Alpha = Average over all k's)
-    mean_regret_for_k_levels = np.array([np.mean(v) for v in regret_by_k.values()])
-    mean_regret_for_alpha_levels = np.array([np.mean(v) for v in regret_by_alpha.values()])
-    
-    mean_auc_for_k_levels = np.array([np.mean(v) for v in auc_by_k.values()])
-    mean_auc_for_alpha_levels = np.array([np.mean(v) for v in auc_by_alpha.values()])
-
-    # 2. Calculate the Variance of those means
-    # This captures how much the average performance shifts when the hyperparameter changes.
-    ablation_data["Regret_Variance_on_K"] = np.var(mean_regret_for_k_levels)
-    ablation_data["Regret_Variance_on_Alpha"] = np.var(mean_regret_for_alpha_levels)
-    ablation_data["AUC_Variance_on_K"] = np.var(mean_auc_for_k_levels)
-    ablation_data["AUC_Variance_on_Alpha"] = np.var(mean_auc_for_alpha_levels)
+    # Calculate variances
+    ablation_data["Regret_Variance_vs_K"] = {k: np.var(v) for k, v in regret_by_k.items()}
+    ablation_data["Regret_Variance_vs_Alpha"] = {a: np.var(v) for a, v in regret_by_alpha.items()}
+    ablation_data["AUC_Variance_vs_K"] = {k: np.var(v) for k, v in auc_by_k.items()}
+    ablation_data["AUC_Variance_vs_Alpha"] = {a: np.var(v) for a, v in auc_by_alpha.items()}
     
     # Save ablation analysis
     with open(os.path.join(output_dir, "ablation_analysis.json"), "w") as f:
-        json.dump(ablation_data, f, indent=4, cls=NumpyEncoder)
+        json.dump(ablation_data, f, indent=4, cls=NumpyEncoder) # Use custom encoder for numpy floats
 
-    # --- 4c. Prepare Plot Lines (Same as before) ---
+    # --- 4c. Prepare Plot Lines ---
     plot_lines = {
-        # ... (plot_lines setup based on min_regret_result and min_auc_result) ...
-        # [Placeholder for existing Step 4c code block]
         "CEI_Baseline": {"result": cei_result, "color": 'tab:blue', "style": 'solid', "label": "CEI (Baseline)"},
         min_regret_name: {"result": min_regret_result, "color": 'tab:red', "style": 'dashed', "label": f"SCEI (Min Regret: k={min_regret_result['hparams']['k']:.2e}, α={min_regret_result['hparams']['alpha']:.2f})"},
     }
@@ -227,11 +210,12 @@ def conduct_comparison_experiment(problem, n_runs=10, dim=2):
     steps = np.arange(1, len(cei_result["mean_regret"]) + 1)
 
 
-    # === Step 5: Plot Regret with Regular (Symmetric) STD (Same as before) ===
+    # ==========================================================
+    # === Step 5: Plot Regret with Regular (Symmetric) STD ===
+    # ==========================================================
     plt.figure(figsize=(10, 6))
     
     # Plot all SCEI regret lines in the background
-    # [Placeholder for existing Step 5 code block]
     for name, r in scei_results.items():
         plt.plot(steps, r["mean_regret"], color='tab:orange', alpha=0.05, linewidth=1)
         
@@ -255,7 +239,6 @@ def conduct_comparison_experiment(problem, n_runs=10, dim=2):
     plt.grid(True, linestyle="--", alpha=0.5)
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, f"{problem}_regret_k_alpha_comparison.png"), dpi=150)
-
 
 # Helper class to serialize numpy floats to standard JSON floats
 class NumpyEncoder(json.JSONEncoder):
