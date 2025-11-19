@@ -231,19 +231,11 @@ def conduct_experiment(problem, n_runs=10, dim=2):
     acq_types = ["cei","scei"]
     for acq in acq_types:
         scei_params= {
-            "k": 1, 
-            "alpha": 0.5 
-            # The following lines defining the parameter search space were comments in the original code,
-            # but are critical for understanding the intent:
-            # [0.01 -> 100] try 10 values
-            # 0.5 -> 0-1 try 10 values
+            "k": 4.64, 
+            "alpha": 0.9 
         }
-        # 100 combinations to try
         
-        # NOTE: In the original code, `scei_params` is defined as a fixed dictionary inside the loop, 
-        # but the comments indicate an intention to iterate over 100 combinations.
-        # Assuming run_experiment uses these fixed values for "scei" in this original code structure.
-        mean_raw, std_raw, all_runs = run_experiment(problem ,acq_type=acq, n_runs=n_runs, visualize= True ,dim=dim, scei_params= scei_params)
+        mean_raw, std_raw, all_runs = run_experiment(problem ,acq_type=acq, n_runs=n_runs, visualize= False ,dim=dim, scei_params= scei_params)
 
         # Compute regret (raw - feasible min)
         mean_regret = feasible_y - mean_raw
@@ -303,7 +295,9 @@ def conduct_experiment(problem, n_runs=10, dim=2):
     plt.savefig(os.path.join(problem, f"{problem}_regret_asym_std.png"), dpi=150)
     
     
-conduct_comparison_experiment("branin_easy_circle", n_runs=3)
+conduct_comparison_experiment("goldstein_annulus", n_runs=5)
+
+#conduct_experiment("branin_easy_circle", n_runs=5)
 
 
 
