@@ -43,6 +43,10 @@ class SigmoidConstrainedEI:
         EI[std_y < 1e-9] = 0.0
         CEI = EI * activated_PF
         return CEI
+    
+    def evaluate_single(self, x, best_feas):
+        x = np.array(x).reshape(1, -1)
+        return self.compute(x, best_feas)[0]
 
 class ConstrainedEI:
     """Expected Improvement with probabilistic constraints (CEI)."""
@@ -78,3 +82,7 @@ class ConstrainedEI:
         EI[std_y < 1e-9] = 0.0
         CEI = EI * PF
         return CEI
+    
+    def evaluate_single(self, x, best_feas):
+        x = np.array(x).reshape(1, -1)
+        return self.compute(x, best_feas)[0]

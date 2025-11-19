@@ -5,6 +5,11 @@ import os
 import json
 import matplotlib.pyplot as plt
 
+import warnings
+from sklearn.exceptions import ConvergenceWarning
+warnings.filterwarnings("ignore", category=ConvergenceWarning)
+warnings.filterwarnings("ignore", message=".*lbfgs failed to converge.*")
+
 def run_experiment(problem, acq_type="cei" ,n_runs=1, visualize= True, dim= 2, scei_params= None):
     
     obj, cons = BENCHMARKS[problem]
@@ -85,11 +90,7 @@ def conduct_comparison_experiment(problem, n_runs=10, dim=2):
     os.makedirs(output_dir, exist_ok=True)
     results = {}
 
-    # === Step 1: Identify feasible maximum (Assumed function call) ===
-    # feasible_x, feasible_y = find_feasible_maximum(problem, dim)
-    # Placeholder for running environment
-    feasible_y = 0.0 # Placeholder value
-    feasible_x = np.array([0.0] * dim) # Placeholder value
+    feasible_x, feasible_y = find_feasible_maximum(problem, dim)
     print(f"Feasible Maximum for {problem}: f(x*) = {feasible_y:.5f} at {feasible_x}")
 
     # === Define Acquisition List ===
@@ -125,6 +126,9 @@ def conduct_comparison_experiment(problem, n_runs=10, dim=2):
         
         # Compute regret: Regret = f(x*) - f(x)
         mean_regret = feasible_y - mean_raw
+        
+        eps = 1e-12
+        mean_regret = np.maximum(mean_regret, eps)
         
         # Compute asymmetric std (not used for the main plot but kept for completeness)
         diffs = np.array(all_runs) - mean_raw[None, :]
@@ -299,8 +303,8 @@ def conduct_experiment(problem, n_runs=10, dim=2):
     
     for acq in acq_types:
         scei_params = {
-            "k": 13, 
-            "alpha": 0.4
+            "k": 15, 
+            "alpha": 0.5
         }
         
         # Run experiment
@@ -308,6 +312,8 @@ def conduct_experiment(problem, n_runs=10, dim=2):
 
         # Compute regret: Regret = f(x*) - f(x) for maximization
         mean_regret = feasible_y - mean_raw
+        eps = 1e-12
+        mean_regret = np.maximum(mean_regret, eps)
         std_regret = std_raw  # Regular (symmetric) standard deviation of the regret
 
         # Compute separate positive/negative std for asymmetric uncertainty
@@ -376,9 +382,9 @@ def conduct_experiment(problem, n_runs=10, dim=2):
     plt.tight_layout()
     plt.savefig(os.path.join(problem, f"{problem}_regret_asym_std.png"), dpi=150)
     
-conduct_comparison_experiment("branin_wavy", n_runs=5)
+#conduct_comparison_experiment("branin_wavy", n_runs=5)
 
-#conduct_experiment("goldstein_annulus", n_runs=10)
+conduct_experiment("hartmann3_tunnel", n_runs=1, dim= 3)
 
 
 

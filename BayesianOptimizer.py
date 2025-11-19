@@ -6,6 +6,9 @@ import os
 from scipy.stats import norm
 from AcquisitionFunctions import ConstrainedEI, SigmoidConstrainedEI
 import matplotlib.pyplot as plt
+from scipy.optimize import minimize
+
+
 
 class BayesianOptimizer:
     def __init__(self, func, constraints, problem ,n_steps=8, init_points=5, m_mc=10, tau=0.5, dim= 2, seed= 0):
@@ -57,7 +60,36 @@ class BayesianOptimizer:
         self.y_train = func(self.X_train).ravel()
         self.yc_trains = [con(self.X_train).ravel() for con in constraints]
         
-        
+    
+    def _optimize_acquisition(self, acq, best_feas, n_restarts=20):
+        """
+        Continuous optimization of the acquisition function using L-BFGS-B.
+        """
+        dim = self.dim
+        bounds = [(0.0, 1.0)] * dim
+
+        best_x = None
+        best_val = -np.inf
+
+        # random restart loop
+        for _ in range(n_restarts):
+
+            # random starting point
+            x0 = np.random.rand(dim)
+
+            def obj(x):
+                return -acq.evaluate_single(x, best_feas)
+
+            res = minimize(obj, x0, method="L-BFGS-B", bounds=bounds)
+
+            if res.success:
+                val = -res.fun
+                if val > best_val:
+                    best_val = val
+                    best_x = res.x
+
+        return best_x, best_val
+
 
 
     # --- GP fit helper ---
@@ -149,16 +181,21 @@ class BayesianOptimizer:
             feas_mask = np.all(np.vstack(self.yc_trains) <= 0, axis=0)
             best_feas = np.max(self.y_train[feas_mask]) if np.any(feas_mask) else -np.inf
             
+            acq= None
             if acq_type == "cei":
                 acq = ConstrainedEI(gp_obj, gp_cons, tau=self.tau)
-                acq_values = acq.compute(self.candidates, best_feas)
-                x_next = self.candidates[np.argmax(acq_values)]
+                
             elif acq_type == "scei":
                 acq = SigmoidConstrainedEI(gp_obj, gp_cons, tau=self.tau, k= scei_params["k"], alpha= scei_params["alpha"])
-                acq_values = acq.compute(self.candidates, best_feas)
-                x_next = self.candidates[np.argmax(acq_values)]
             else:
                 raise ValueError(f"Unknown acq_type {acq_type}")
+            
+            x_next, acq_values = self._optimize_acquisition(acq, best_feas)
+            if x_next is None:
+                print("L-BFGS-B failed → using grid.")
+                acq_values = acq.compute(self.candidates, best_feas)
+                x_next = self.candidates[np.argmax(acq_values)]
+
             
             # Visualization (optional)
             if visualize  and self.dim==2:
