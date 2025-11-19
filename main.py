@@ -118,17 +118,10 @@ def conduct_comparison_experiment(problem, n_runs=10, dim=2):
     for i, (acq_name, hparams) in enumerate(acq_list):
         acq_type = "cei" if acq_name == "cei" else "scei"
         
-        # NOTE: run_experiment is assumed to be defined elsewhere and callable
-        # mean_raw, std_raw, all_runs = run_experiment(
-        #     problem, acq_type=acq_type, n_runs=n_runs, visualize=False, dim=dim, scei_params=hparams
-        # )
+        mean_raw, std_raw, all_runs = run_experiment(
+            problem, acq_type=acq_type, n_runs=n_runs, visualize=False, dim=dim, scei_params=hparams
+        )
         
-        # Placeholder for experiment run (Replace with actual call in a functional environment)
-        # Using dummy data for demonstration
-        n_steps = 15 if dim == 2 else 20
-        mean_raw = np.linspace(feasible_y * 0.5, feasible_y * 0.9, n_steps + 1)
-        std_raw = np.random.rand(n_steps + 1) * 0.1
-        all_runs = np.random.rand(n_runs, n_steps + 1) 
         
         # Compute regret: Regret = f(x*) - f(x)
         mean_regret = feasible_y - mean_raw
